@@ -4,6 +4,7 @@ namespace App\Services;
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
+use Illuminate\Support\Facades\Log;
 
 class RxNormService
 {
@@ -21,13 +22,23 @@ class RxNormService
     public function searchDrugs($drugName, $tty = 'SBD', $limit = 5)
     {
         try {
-            $response = $this->client->get("drugs?name=$drugName&tty=$tty");
-            $data = json_decode($response->getBody(), true);
+            $response = $this->client->get("drug.json", [
+                'query' => [
+                    'name' => $drugName,
+                    'tty' => $tty,
+                ]
+            ]);
+            
+            $data = json_decode($response->getBody()->getContents(), true);
+            
+            // Log raw response for debugging
+            Log::info('RxNorm searchDrugs response', ['response' => $data]);
 
             $results = [];
-            if (isset($data['drugGroup']['conceptGroup'])) {
+
+            if (!empty($data['drugGroup']['conceptGroup'])) {
                 foreach ($data['drugGroup']['conceptGroup'] as $group) {
-                    if (isset($group['conceptProperties'])) {
+                    if (!empty($group['conceptProperties'])) {
                         foreach (array_slice($group['conceptProperties'], 0, $limit) as $drug) {
                             $details = $this->getDrugDetails($drug['rxcui']);
                             $results[] = [
@@ -40,8 +51,11 @@ class RxNormService
                     }
                 }
             }
+
             return $results;
+
         } catch (GuzzleException $e) {
+            Log::error('RxNorm searchDrugs API error: ' . $e->getMessage());
             return [];
         }
     }
@@ -49,23 +63,23 @@ class RxNormService
     public function getDrugDetails($rxcui)
     {
         try {
-            $response = $this->client->get("rxcui/$rxcui/historystatus.json");
-            $data = json_decode($response->getBody(), true);
+            $response = $this->client->get("rxcui/{$rxcui}/historystatus.json");
+            $data = json_decode($response->getBody()->getContents(), true);
 
             $baseNames = [];
             $dosageForms = [];
 
-            if (isset($data['rxcuiStatusHistory']['ingredientAndStrength'])) {
+            if (!empty($data['rxcuiStatusHistory']['ingredientAndStrength'])) {
                 foreach ($data['rxcuiStatusHistory']['ingredientAndStrength'] as $ingredient) {
-                    if (isset($ingredient['baseName'])) {
+                    if (!empty($ingredient['baseName'])) {
                         $baseNames[] = $ingredient['baseName'];
                     }
                 }
             }
 
-            if (isset($data['rxcuiStatusHistory']['doseFormGroupConcept'])) {
+            if (!empty($data['rxcuiStatusHistory']['doseFormGroupConcept'])) {
                 foreach ($data['rxcuiStatusHistory']['doseFormGroupConcept'] as $doseForm) {
-                    if (isset($doseForm['doseFormGroupName'])) {
+                    if (!empty($doseForm['doseFormGroupName'])) {
                         $dosageForms[] = $doseForm['doseFormGroupName'];
                     }
                 }
@@ -76,6 +90,7 @@ class RxNormService
                 'dosage_forms' => array_unique($dosageForms),
             ];
         } catch (GuzzleException $e) {
+            Log::error('RxNorm getDrugDetails API error: ' . $e->getMessage());
             return [
                 'base_names' => [],
                 'dosage_forms' => [],
@@ -86,11 +101,12 @@ class RxNormService
     public function validateRxcui($rxcui)
     {
         try {
-            $response = $this->client->get("rxcui/$rxcui/properties.json");
-            $data = json_decode($response->getBody(), true);
+            $response = $this->client->get("rxcui/{$rxcui}/properties.json");
+            $data = json_decode($response->getBody()->getContents(), true);
 
             return isset($data['properties']);
         } catch (GuzzleException $e) {
+            Log::error('RxNorm validateRxcui API error: ' . $e->getMessage());
             return false;
         }
     }
@@ -98,13 +114,14 @@ class RxNormService
     public function getDrugName($rxcui)
     {
         try {
-            $response = $this->client->get("rxcui/$rxcui/properties.json");
-            $data = json_decode($response->getBody(), true);
+            $response = $this->client->get("rxcui/{$rxcui}/properties.json");
+            $data = json_decode($response->getBody()->getContents(), true);
 
             return [
                 'name' => $data['properties']['name'] ?? 'Unknown Drug',
             ];
         } catch (GuzzleException $e) {
+            Log::error('RxNorm getDrugName API error: ' . $e->getMessage());
             return [
                 'name' => 'Unknown Drug',
             ];
